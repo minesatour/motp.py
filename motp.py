@@ -1,21 +1,22 @@
 import time
 import json
-from mitmproxy import ctx, http
+import mitmproxy.http
+from mitmproxy import ctx, options
 from mitmproxy.addonmanager import AddonManager
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-import joblib
-import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.proxy import Proxy, ProxyType
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+import joblib
+import os
 from threading import Thread
 
 # Define the websites to monitor for OTP requests
-BLOCKED_SITES = ["paypal.com", "paypal.co.uk", "ebay.co.uk", "ebay.com", "clearpay.com", "amazon.co.uk", "amazon.com"]
+BLOCKED_SITES = ["paypal.com", "ebay.com", "amazon.com"]
 
-# Class to handle OTP Blocking based on machine learning model
+# Class to handle OTP detection based on machine learning
 class AIOTPBlocking:
     def __init__(self):
         self.model = None
@@ -24,38 +25,37 @@ class AIOTPBlocking:
         self.load_model()
 
     def load_model(self):
-        """Load pre-trained model if available, otherwise initialize an empty model"""
+        """Load pre-trained model if available, otherwise initialise an empty model."""
         if os.path.exists(self.model_file):
             self.model = joblib.load(self.model_file)
         else:
             self.model = RandomForestClassifier()
 
     def save_model(self):
-        """Save the current trained model to file"""
+        """Save the trained model."""
         joblib.dump(self.model, self.model_file)
 
     def train_model(self, data):
-        """Train the model using the collected data"""
-        if len(data) > 0:
+        """Train the model using the collected data."""
+        if data:
             X = [d['features'] for d in data]
             y = [d['label'] for d in data]
             self.model.fit(X, y)
             self.save_model()
 
     def extract_features(self, flow):
-        """Extract features from the HTTP request to feed into the ML model"""
-        features = [flow.request.url, flow.request.method]
-        return features
+        """Extract features from the HTTP request."""
+        return [flow.request.url, flow.request.method]
 
     def predict(self, flow):
-        """Use the trained model to predict if a request is related to OTP"""
+        """Predict if the request is OTP-related."""
         if self.model:
             features = self.extract_features(flow)
             return self.model.predict([features])[0] == 1
         return False  # Default to False if no model is available
 
     def update_data(self, flow, is_otp):
-        """Update request data for future training"""
+        """Update request data for training."""
         request_data = {
             "url": flow.request.url,
             "method": flow.request.method,
@@ -66,83 +66,75 @@ class AIOTPBlocking:
             json.dump(request_data, file)
             file.write('\n')
 
-# Mitmproxy addon to block OTP requests
+# Mitmproxy addon to monitor and intercept OTP requests
 class BlockOTPRequestsAddon:
     def __init__(self, ai_blocking):
         self.ai_blocking = ai_blocking
 
-    def request(self, flow: http.HTTPFlow):
-        """Intercept each HTTP request and block OTP requests"""
+    def request(self, flow: mitmproxy.http.HTTPFlow):
+        """Intercept HTTP requests and detect OTP requests."""
         if any(site in flow.request.host for site in BLOCKED_SITES):
             if self.ai_blocking.predict(flow):
-                flow.response = http.Response.make(
-                    403, b"OTP Request Blocked", {"Content-Type": "text/plain"}
-                )
+                ctx.log.info(f"OTP request intercepted: {flow.request.url}")
                 self.ai_blocking.update_data(flow, True)
-                ctx.log.info(f"Blocked OTP request: {flow.request.url}")
             else:
                 self.ai_blocking.update_data(flow, False)
 
-# Function to start mitmproxy in a separate thread
+# Function to start mitmproxy
 def start_mitmproxy():
     ai_blocking = AIOTPBlocking()
     addon = BlockOTPRequestsAddon(ai_blocking)
-    addons = AddonManager()
-    addons.add(addon)
+    opts = options.Options(listen_host='127.0.0.1', listen_port=8080)
+    master = mitmproxy.master.Master(opts)
+    master.addons.add(addon)
+    master.run()
 
-    # Start mitmproxy with the addons
-    from mitmproxy.tools.main import mitmdump
-    mitmdump(["-s", addon])
-
-# Function to open a Firefox session with the configured proxy (Tor support)
+# Function to open Firefox with optional Tor proxy
 def open_firefox_session(use_tor=False):
-    # Set up Firefox options
     options = Options()
-    options.headless = False  # Set to True for headless browsing
+    options.headless = False  # Change to True for headless mode
 
-    # Configure proxy settings to route through Tor if necessary
+    # Set up Tor proxy if enabled
     if use_tor:
         proxy = Proxy()
         proxy.proxy_type = ProxyType.MANUAL
-        proxy.http_proxy = '127.0.0.1:9050'  # Tor SOCKS proxy
-        proxy.ssl_proxy = '127.0.0.1:9050'   # Tor SOCKS proxy for SSL connections
-        options.proxy = proxy
+        proxy.http_proxy = "127.0.0.1:9050"
+        proxy.ssl_proxy = "127.0.0.1:9050"
 
-    # Return a new Firefox driver with the specified options
-    driver = webdriver.Firefox(options=options)
+        capabilities = webdriver.DesiredCapabilities.FIREFOX
+        proxy.add_to_capabilities(capabilities)
+
+        driver = webdriver.Firefox(options=options, desired_capabilities=capabilities)
+    else:
+        driver = webdriver.Firefox(options=options)
+
     return driver
 
-# Function to run Selenium and simulate browsing
+# Function to browse websites with Selenium
 def selenium_browsing():
     driver = open_firefox_session(use_tor=True)
 
-    # Example URL to visit (can be changed to any URL)
-    driver.get("https://www.paypal.com/signin")
-    time.sleep(10)  # Adjust based on loading times
-
-    # If OTP is detected and blocked, this part won't be triggered
+    # Example: Visit PayPal and simulate interaction
     try:
-        otp_field = driver.find_element(By.CSS_SELECTOR, 'input[type="text"][name*="otp"]')
-        print("OTP field detected. Blocking OTP request.")
-    except Exception as e:
-        print("OTP field not found or another error occurred:", str(e))
+        driver.get("https://www.paypal.com/signin")
+        time.sleep(10)
 
-    # Simulate browsing other pages
-    driver.get("https://www.ebay.com")
-    time.sleep(5)
+        otp_field = driver.find_element(By.CSS_SELECTOR, 'input[type="text"][name*="otp"]')
+        print("OTP field detected.")
+    except Exception as e:
+        print("Error or OTP field not found:", str(e))
 
     driver.quit()
 
-# Function to run everything in the background
+# Main function to run everything
 def run_script():
     # Start mitmproxy in a separate thread
     mitmproxy_thread = Thread(target=start_mitmproxy)
     mitmproxy_thread.daemon = True
     mitmproxy_thread.start()
 
-    # Simulate browsing with Selenium
+    # Run Selenium browsing
     selenium_browsing()
 
-# Start the script
 if __name__ == "__main__":
     run_script()
