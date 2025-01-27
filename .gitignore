@@ -1,0 +1,33 @@
+# Python-related files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+
+# Virtual environment folders
+venv/
+env/
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# System-specific files
+.DS_Store
+Thumbs.db
+
+# Flask instance folder (contains runtime files, database)
+instance/
+
+# mitmproxy certificates (if you want to avoid committing sensitive data)
+mitmproxy-ca-cert.pem
+
+# Model files (if you're storing large models like OTP classifiers)
+*.pkl
+
+# Browser profile data (for Firefox)
+firefox_profile/
+
+# Tor data
+tor_data/
