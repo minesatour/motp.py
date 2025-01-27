@@ -2,17 +2,16 @@ import time
 import json
 import mitmproxy.http
 from mitmproxy import ctx
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.firefox.options import Options
-from threading import Thread
-import subprocess
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+import joblib
 import os
-from flask import Flask, render_template, jsonify
-
-# Flask setup for real-time OTP dashboard
-app = Flask(__name__)
-otp_codes = []  # Store OTP codes here
+from selenium import webdriver
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.proxy import Proxy, ProxyType
+from threading import Thread
+from collections import deque
 
 # Define the websites to monitor for OTP requests
 BLOCKED_SITES = ["paypal.com", "paypal.co.uk", "ebay.co.uk", "ebay.com", "clearpay.com", "amazon.co.uk", "amazon.com"]
@@ -47,6 +46,7 @@ class AIOTPBlocking:
     def extract_features(self, flow):
         """Extract features from the HTTP request to feed into the ML model"""
         features = [flow.request.url, flow.request.method]
+        # You can add more sophisticated feature extraction here if needed
         return features
 
     def predict(self, flow):
@@ -68,127 +68,85 @@ class AIOTPBlocking:
             json.dump(request_data, file)
             file.write('\n')
 
-# Flask route to display intercepted OTP codes
-@app.route('/otp_codes')
-def otp_dashboard():
-    return render_template('dashboard.html', otp_codes=otp_codes)
-
-@app.route('/api/otp_codes')
-def otp_codes_api():
-    return jsonify(otp_codes)
-
-# Mitmproxy addon to handle OTP detection and interception
-class OTPDetectionAddon:
+# Mitmproxy addon to block OTP requests
+class BlockOTPRequestsAddon:
     def __init__(self, ai_blocking):
         self.ai_blocking = ai_blocking
 
     def request(self, flow: mitmproxy.http.HTTPFlow):
-        """Intercept each HTTP request and look for OTP requests"""
+        """Intercept each HTTP request and block OTP requests"""
         if any(site in flow.request.host for site in BLOCKED_SITES):
             if self.ai_blocking.predict(flow):
                 flow.response = mitmproxy.http.Response.make(
-                    403, b"OTP/2FA Request Blocked", {"Content-Type": "text/plain"}
+                    403, b"OTP Request Blocked", {"Content-Type": "text/plain"}
                 )
                 self.ai_blocking.update_data(flow, True)
                 ctx.log.info(f"Blocked OTP request: {flow.request.url}")
             else:
                 self.ai_blocking.update_data(flow, False)
 
-    def response(self, flow: mitmproxy.http.HTTPFlow):
-        """Intercept OTP responses and extract OTP codes"""
-        # Look for OTP or 2FA related responses
-        if flow.response.content:
-            # Extract OTP from the response if it's included in the body or headers
-            # This can be expanded with specific parsing methods depending on the website's OTP response format
-            if b'OTP' in flow.response.content or b'2FA' in flow.response.content:
-                otp_code = extract_otp_code(flow.response.content)
-                if otp_code:
-                    otp_codes.append(otp_code)
-                    ctx.log.info(f"Intercepted OTP: {otp_code}")
-                    # Optionally, update the real-time dashboard with Flask
-                    update_dashboard(otp_code)
-
-# Helper function to extract OTP from a response
-def extract_otp_code(response_content):
-    """A simple function to extract OTP from a response content"""
-    import re
-    # This is a very basic example; real-world applications need more sophisticated parsing
-    otp_match = re.search(r'(\d{6})', response_content.decode('utf-8'))
-    if otp_match:
-        return otp_match.group(1)
-    return None
-
-def update_dashboard(otp_code):
-    """Update OTP codes on the Flask dashboard"""
-    otp_codes.append(otp_code)
-
 # Function to start mitmproxy in a separate thread
 def start_mitmproxy():
     ai_blocking = AIOTPBlocking()
-    addon = OTPDetectionAddon(ai_blocking)
+    addon = BlockOTPRequestsAddon(ai_blocking)
     options = mitmproxy.options.Options(listen_host='127.0.0.1', listen_port=8080)
     m = mitmproxy.controller.Master(options)
     m.addons.add(addon)
     m.run()
 
-# Function to launch Firefox with Tor and proxy support
-def open_firefox_session(use_tor=False, use_proxy=False):
+# Updated function to open Firefox session with Tor proxy if specified
+def open_firefox_session(use_tor=False):
     options = Options()
-    options.headless = False
-    options.add_argument("--private")
-    options.add_argument("--incognito")
-    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    options.headless = False  # Set to True for headless browsing
     
-    profile = webdriver.FirefoxProfile()
-    
+    # Configure proxy settings
     if use_tor:
-        profile.set_proxy({
-            "proxyType": "MANUAL",
-            "httpProxy": "127.0.0.1",
-            "httpPort": 9050,
-            "sslProxy": "127.0.0.1",
-            "sslPort": 9050
-        })
+        proxy = Proxy()
+        proxy.proxy_type = ProxyType.MANUAL
+        proxy.http_proxy = "127.0.0.1:9050"  # Default Tor proxy for HTTP
+        proxy.ssl_proxy = "127.0.0.1:9050"   # Default Tor proxy for HTTPS
+        capabilities = webdriver.DesiredCapabilities.FIREFOX
+        proxy.add_to_capabilities(capabilities)
+        
+        # Set Firefox options with the proxy configuration
+        driver = webdriver.Firefox(options=options, capabilities=capabilities)
+    else:
+        # Without Tor, we can just use the default settings
+        driver = webdriver.Firefox(options=options)
     
-    if use_proxy:
-        profile.set_proxy({
-            "proxyType": "MANUAL",
-            "httpProxy": "proxy_ip_address",
-            "httpPort": "proxy_port",
-            "sslProxy": "proxy_ip_address",
-            "sslPort": "proxy_port"
-        })
-    
-    driver = webdriver.Firefox(firefox_profile=profile, options=options)
     return driver
+
+# Function to run Selenium and simulate browsing
+def selenium_browsing():
+    driver = open_firefox_session(use_tor=True)
+
+    # Example URL to visit (can be changed to any URL)
+    driver.get("https://www.paypal.com/signin")
+    time.sleep(10)  # Adjust based on loading times
+
+    # If OTP is detected and blocked, this part won't be triggered
+    try:
+        otp_field = driver.find_element(By.CSS_SELECTOR, 'input[type="text"][name*="otp"]')
+        print("OTP field detected. Blocking OTP request.")
+    except Exception as e:
+        print("OTP field not found or another error occurred:", str(e))
+
+    # Simulate browsing other pages
+    driver.get("https://www.ebay.com")
+    time.sleep(5)
+
+    driver.quit()
 
 # Function to run everything in the background
 def run_script():
+    # Start mitmproxy in a separate thread
     mitmproxy_thread = Thread(target=start_mitmproxy)
     mitmproxy_thread.daemon = True
     mitmproxy_thread.start()
 
+    # Simulate browsing with Selenium
     selenium_browsing()
 
-# Example Selenium browsing to trigger OTP/2FA detection
-def selenium_browsing():
-    driver = open_firefox_session(use_tor=True)
-    driver.get("https://www.paypal.com/signin")
-    time.sleep(10)
-
-    # Further interactions with OTP detection
-    try:
-        otp_field = driver.find_element(By.CSS_SELECTOR, 'input[type="text"][name*="otp"]')
-        print("OTP field detected.")
-    except Exception as e:
-        print("OTP field not found:", str(e))
-
-    driver.quit()
-
-# Run the Flask app and start script simultaneously
+# Start the script
 if __name__ == "__main__":
-    flask_thread = Thread(target=lambda: app.run(debug=True, use_reloader=False))
-    flask_thread.daemon = True
-    flask_thread.start()
-
     run_script()
