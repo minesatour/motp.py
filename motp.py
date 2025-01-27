@@ -7,8 +7,8 @@ from sklearn.model_selection import train_test_split
 import joblib
 import os
 from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from threading import Thread
 from collections import deque
@@ -94,26 +94,28 @@ def start_mitmproxy():
     m.addons.add(addon)
     m.run()
 
-# Updated function to open Firefox session with Tor proxy if specified
+# Function to open a Firefox session with the configured proxy (Tor support)
 def open_firefox_session(use_tor=False):
+    # Set up Firefox options
     options = Options()
     options.headless = False  # Set to True for headless browsing
-    
-    # Configure proxy settings
+
+    # Configure proxy settings to route through Tor if necessary
     if use_tor:
         proxy = Proxy()
         proxy.proxy_type = ProxyType.MANUAL
-        proxy.http_proxy = "127.0.0.1:9050"  # Default Tor proxy for HTTP
-        proxy.ssl_proxy = "127.0.0.1:9050"   # Default Tor proxy for HTTPS
-        capabilities = webdriver.DesiredCapabilities.FIREFOX
-        proxy.add_to_capabilities(capabilities)
+        proxy.http_proxy = '127.0.0.1:9050'  # Tor SOCKS proxy
+        proxy.socks_proxy = '127.0.0.1:9050'  # Tor SOCKS proxy for all protocols
+        proxy.ssl_proxy = '127.0.0.1:9050'   # Tor SOCKS proxy for SSL connections
         
-        # Set Firefox options with the proxy configuration
+        capabilities = webdriver.DesiredCapabilities.FIREFOX.copy()
+        capabilities['proxy'] = proxy.to_capabilities()  # Fix: use `to_capabilities()`
+
+        # Return a new Firefox driver with the specified proxy settings
         driver = webdriver.Firefox(options=options, capabilities=capabilities)
     else:
-        # Without Tor, we can just use the default settings
         driver = webdriver.Firefox(options=options)
-    
+
     return driver
 
 # Function to run Selenium and simulate browsing
