@@ -107,13 +107,11 @@ def open_firefox_session(use_tor=False):
         proxy.http_proxy = '127.0.0.1:9050'  # Tor SOCKS proxy
         proxy.ssl_proxy = '127.0.0.1:9050'   # Tor SOCKS proxy for SSL connections
 
-        capabilities = proxy.to_capabilities()  # Use to_capabilities() to apply proxy settings
+        # Apply proxy settings to Firefox options
+        options.proxy = proxy
 
-        # Return a new Firefox driver with the specified proxy settings
-        driver = webdriver.Firefox(options=options, desired_capabilities=capabilities)
-    else:
-        driver = webdriver.Firefox(options=options)
-
+    # Return a new Firefox driver with the specified options
+    driver = webdriver.Firefox(options=options)
     return driver
 
 # Function to run Selenium and simulate browsing
