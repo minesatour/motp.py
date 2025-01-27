@@ -109,7 +109,7 @@ def open_firefox_session(use_tor=False):
         proxy.ssl_proxy = '127.0.0.1:9050'   # Tor SOCKS proxy for SSL connections
         
         capabilities = webdriver.DesiredCapabilities.FIREFOX.copy()
-        capabilities['proxy'] = proxy.to_capabilities()  # Fix: use `to_capabilities()`
+        capabilities['proxy'] = proxy.to_capabilities()  # Corrected the use of `to_capabilities()`
 
         # Return a new Firefox driver with the specified proxy settings
         driver = webdriver.Firefox(options=options, capabilities=capabilities)
