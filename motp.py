@@ -1,7 +1,7 @@
 import time
 import json
-import mitmproxy
-from mitmproxy import ctx
+from mitmproxy import ctx, http
+from mitmproxy.addonmanager import AddonManager
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import joblib
@@ -11,7 +11,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from threading import Thread
-from collections import deque
 
 # Define the websites to monitor for OTP requests
 BLOCKED_SITES = ["paypal.com", "paypal.co.uk", "ebay.co.uk", "ebay.com", "clearpay.com", "amazon.co.uk", "amazon.com"]
@@ -46,7 +45,6 @@ class AIOTPBlocking:
     def extract_features(self, flow):
         """Extract features from the HTTP request to feed into the ML model"""
         features = [flow.request.url, flow.request.method]
-        # You can add more sophisticated feature extraction here if needed
         return features
 
     def predict(self, flow):
@@ -73,11 +71,11 @@ class BlockOTPRequestsAddon:
     def __init__(self, ai_blocking):
         self.ai_blocking = ai_blocking
 
-    def request(self, flow: mitmproxy.http.HTTPFlow):
+    def request(self, flow: http.HTTPFlow):
         """Intercept each HTTP request and block OTP requests"""
         if any(site in flow.request.host for site in BLOCKED_SITES):
             if self.ai_blocking.predict(flow):
-                flow.response = mitmproxy.http.Response.make(
+                flow.response = http.Response.make(
                     403, b"OTP Request Blocked", {"Content-Type": "text/plain"}
                 )
                 self.ai_blocking.update_data(flow, True)
@@ -89,10 +87,12 @@ class BlockOTPRequestsAddon:
 def start_mitmproxy():
     ai_blocking = AIOTPBlocking()
     addon = BlockOTPRequestsAddon(ai_blocking)
-    options = mitmproxy.options.Options(listen_host='127.0.0.1', listen_port=8080)  # Updated for newer mitmproxy
-    m = mitmproxy.controller.Master(options)
-    m.addons.add(addon)
-    m.run()
+    addons = AddonManager()
+    addons.add(addon)
+
+    # Start mitmproxy with the addons
+    from mitmproxy.tools.main import mitmdump
+    mitmdump(["-s", addon])
 
 # Function to open a Firefox session with the configured proxy (Tor support)
 def open_firefox_session(use_tor=False):
@@ -105,15 +105,11 @@ def open_firefox_session(use_tor=False):
         proxy = Proxy()
         proxy.proxy_type = ProxyType.MANUAL
         proxy.http_proxy = '127.0.0.1:9050'  # Tor SOCKS proxy
-        proxy.socks_proxy = '127.0.0.1:9050'  # Tor SOCKS proxy for all protocols
         proxy.ssl_proxy = '127.0.0.1:9050'   # Tor SOCKS proxy for SSL connections
-        
-        # Assign proxy settings to Firefox options
         options.proxy = proxy
 
     # Return a new Firefox driver with the specified options
     driver = webdriver.Firefox(options=options)
-
     return driver
 
 # Function to run Selenium and simulate browsing
