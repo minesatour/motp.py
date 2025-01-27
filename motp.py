@@ -1,6 +1,6 @@
 import time
 import json
-import mitmproxy.http
+import mitmproxy
 from mitmproxy import ctx
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -89,7 +89,7 @@ class BlockOTPRequestsAddon:
 def start_mitmproxy():
     ai_blocking = AIOTPBlocking()
     addon = BlockOTPRequestsAddon(ai_blocking)
-    options = mitmproxy.options.Options(listen_host='127.0.0.1', listen_port=8080)
+    options = mitmproxy.options.Options(listen_host='127.0.0.1', listen_port=8080)  # Updated for newer mitmproxy
     m = mitmproxy.controller.Master(options)
     m.addons.add(addon)
     m.run()
@@ -108,13 +108,11 @@ def open_firefox_session(use_tor=False):
         proxy.socks_proxy = '127.0.0.1:9050'  # Tor SOCKS proxy for all protocols
         proxy.ssl_proxy = '127.0.0.1:9050'   # Tor SOCKS proxy for SSL connections
         
-        capabilities = webdriver.DesiredCapabilities.FIREFOX.copy()
-        capabilities['proxy'] = proxy.to_capabilities()  # Corrected the use of `to_capabilities()`
+        # Assign proxy settings to Firefox options
+        options.proxy = proxy
 
-        # Return a new Firefox driver with the specified proxy settings
-        driver = webdriver.Firefox(options=options, capabilities=capabilities)
-    else:
-        driver = webdriver.Firefox(options=options)
+    # Return a new Firefox driver with the specified options
+    driver = webdriver.Firefox(options=options)
 
     return driver
 
